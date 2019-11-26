@@ -1,53 +1,55 @@
 import cv2
 import numpy as np
-from OCR import tesseract
-from skew_correction.skewer import Skewer
+import pytesseract
+from imutils.perspective import four_point_transform
+import imutils
 
 # tesseract_path=r'C:\Program Files\Tesseract-OCR\tesseract'
-img_path='env\\images\\1.png'
+img_path='env\\images\\skew\\6.jpg'
+# img_path='env\\images\\1.png'
 # custom_config = r'-l eng+tha -c preserve_interword_spaces=1'
 
-def preprocessing():
-    img=cv2.imread(img_path)
-    imgcp=img.copy()
-    # img_resize=cv2.resize(imgcp,None,fx=1.5,fy=1.5)
-    img_gray= cv2.cvtColor(imgcp,cv2.COLOR_BGR2GRAY)
-    cv2.imwrite("img_gray.png",img_gray)
+def imshow(*args,**kwargs):
+    """ 
+    example:
+        imshow("title",image)
+        imshow(image)
+        imshow("title",image=image)
+        imshow(title="title",image=image)
+        imshow([("title1",image1),image2])
 
-    # kernel=np.ones((3,3),np.uint8)
-    # dilate=cv2.dilate(img_gray,kernel,iterations=1)
-    # erosion=cv2.erode(dilate,kernel,iterations=1)
-    # cv2.imwrite("erosion.png",erosion)
-
-
-    kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
-    im = cv2.filter2D(img_gray, -1, kernel)
-    cv2.imwrite("filter2D.png",im)
-
-    # img_thd=cv2.adaptiveThreshold(im,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,11,2)
-    # cv2.imwrite("adaptiveThreshold.png",img_thd)
-
-def skewCorrection(img_path):
-    img=cv2.imread(img_path)
-    img=img.copy()
-    # img_resize=cv2.resize(imgcp,None,fx=0.5,fy=0.5)
-    # gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    # gray = cv2.GaussianBlur(gray, (5, 5), 0)
-    # edged = cv2.Canny(gray, 10, 50)
-
-    skewer = Skewer(image_data=img)
-    rotated = skewer.get_rotated()
-
-    if skewer.is_rotated(): # Returns true or false according to any skew operation
-        cv2.imshow("Rotated image", rotated)
-        cv2.imshow("image", img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+    """
     
-def correct_skew(img_path,verbose=False):
-    image = cv2.imread(img_path)
-    image = cv2.resize(image,None,fx=1.5,fy=1.5)
-    image=image.copy()
+    if kwargs.get("title") and kwargs.get("image"):
+        cv2.imshow(kwargs.get("title") ,kwargs.get("image"))
+    elif kwargs.get("image"):
+        title = args[0] if args[0] else "-"
+        cv2.imshow(title,kwargs.get("image"))
+    if len(args)==1:
+        if isinstance(args[0],list): 
+            for p in args[0]:
+                if isinstance(p,tuple): 
+                    title,image=p
+                elif isinstance(p,np.ndarray):
+                    title,image="",p
+                cv2.imshow(title,image)
+        
+        elif isinstance(args[0],np.ndarray):
+            cv2.imshow("",args[0])
+    elif len(args)==2:
+        title,image=args
+        cv2.imshow(title,image)
+
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+def tesseract(image_path,config=r'--oem 1 -l eng+tha -c preserve_interword_spaces=1',tesseract_path=r'C:\Program Files\Tesseract-OCR\tesseract'):
+    pytesseract.pytesseract.tesseract_cmd=tesseract_path
+    return pytesseract.image_to_string(image_path, config=config)
+
+def correct_skew(image,verbose=False):
+    # image = cv2.resize(image,None,fx=0.5,fy=0.5)
+    orig=image.copy()
     
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.bitwise_not(gray)
@@ -72,19 +74,75 @@ def correct_skew(img_path,verbose=False):
     
     if verbose:
         print("[INFO] angle: {:.3f}".format(angle))
-        cv2.imshow("Input", image)
-        cv2.imshow("Rotated", rotated)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        imshow([("Input", image),("Rotated", rotated)])
     
     return rotated
 
-img =correct_skew(img_path,verbose=True)
+def perspective_transform(image,verbose=False):
+    orig = image.copy()
+    ratio = orig.shape[0] / 500.0
+    image = imutils.resize(image, height = 500)
+    
+  ############# STEP 1: Edge Detection ######################
 
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    edged = cv2.Canny(gray, 75, 200)
+    
+    if verbose:
+        # show the original image and the edge detected image
+        print("STEP 1: Edge Detection")
+        imshow([("Image", image),("Edged", edged)])
+
+  ############# STEP 2: Find contours of paper ######################
+
+    cnts = cv2.findContours(edged.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    cnts = imutils.grab_contours(cnts)
+    cnts = sorted(cnts, key = cv2.contourArea, reverse = True)[:5]
+    
+    # loop over the contours
+    for c in cnts:
+        # approximate the contour
+        peri = cv2.arcLength(c, True)
+        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+    
+        # if our approximated contour has four points, then we
+        # can assume that we have found our screen
+        if len(approx) == 4:
+            screenCnt = approx
+            break
+    
+    if verbose:
+        # show the contour (outline) of the piece of paper
+        print("STEP 2: Find contours of paper")
+        cv2.drawContours(image, [screenCnt], -1, (0, 255, 0), 2)
+        imshow([("Outline", image)])
+
+  ############## STEP 3: Perspective transform #####################
+
+    warped = four_point_transform(orig, screenCnt.reshape(4, 2) * ratio)
+    warped = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+
+    if verbose:
+        # show the original and scanned images
+        print("STEP 3: Apply perspective transform")
+        imshow([
+            ("Original", imutils.resize(orig, height = 650)),
+            ("Scanned", imutils.resize(warped, height = 650))])
+    
+    return imutils.resize(warped, height = 650)
+
+img_path='env\\images\\1.png'
+img=cv2.imread(img_path)
+# img = correct_skew(img,True)
+img = perspective_transform(img)
 text=tesseract(img)
 print(text)
+imshow(img)
+
 
 # json={"name":"","hn":"006431-59","dose":"","instruction":"ORAL 1 TSP,PRN","itemId":"",
 # "med_name":"Paracet syr 120 mg/5ml","date":"23/08/2562","hospital_number":"11305",
 # "amount":"1.00","usage":"","remark":""
 # }
+
