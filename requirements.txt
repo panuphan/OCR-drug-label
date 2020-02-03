@@ -1,3 +1,4 @@
 pyzbar
 pytesseract
-fuzzywuzzy
+fuzzywuzzy[speedup]
+numpy
